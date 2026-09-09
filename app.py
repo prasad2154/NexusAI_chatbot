@@ -91,6 +91,20 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+@st.cache_data(ttl=60)
+def get_available_models(host_url):
+    model_options = ["llama3.2:latest", "llama3", "mistral", "phi3", "gemma"]
+    try:
+        headers = {"Bypass-Tunnel-Remainder": "true", "User-Agent": "Mozilla/5.0"}
+        r = requests.get(f"{host_url.rstrip('/')}/api/tags", headers=headers, timeout=1.5)
+        if r.status_code == 200:
+            fetched_models = [m['name'] for m in r.json().get('models', [])]
+            if fetched_models:
+                return fetched_models
+    except Exception:
+        pass
+    return model_options
+
 # Sidebar Configuration & Features
 with st.sidebar:
     st.title("⚡ NexusAI")
@@ -98,20 +112,15 @@ with st.sidebar:
     
     st.markdown("---")
     
-    # Model Selection & Host Config (Enables Network Sharing)
-    st.subheader("⚙️ Server & Network Settings")
-    ollama_host = st.text_input("Ollama Host URL", value="http://localhost:11434", help="Change to your server IP (e.g., http://192.168.1.50:11434) to share with everyone on network!")
+    # Default Ollama Host URL (can be set to environment variable or public tunnel)
+    default_url = "http://localhost:11434"
+    ollama_host = st.text_input("Ollama Host URL", value=default_url, help="Set your public Ollama URL here so all users can connect automatically.")
+
     
-    # Try fetching available models dynamically
-    model_options = ["llama3.2:latest", "llama3", "mistral", "phi3", "gemma"]
-    try:
-        r = requests.get(f"{ollama_host}/api/tags", timeout=3)
-        if r.status_code == 200:
-            fetched_models = [m['name'] for m in r.json().get('models', [])]
-            if fetched_models:
-                model_options = fetched_models
-    except Exception:
-        pass
+    # Fetch cached models
+    model_options = get_available_models(ollama_host)
+
+
 
     selected_model = st.selectbox("Select AI Model", model_options, index=0)
     
@@ -121,6 +130,10 @@ with st.sidebar:
     )
     
     st.markdown("---")
+    
+    # Check if running on cloud vs local
+    if "localhost" in ollama_host or "127.0.0.1" in ollama_host:
+        st.warning("⚠️ **Cloud Notice**: You are on a cloud deployment (Streamlit Cloud). `localhost` refers to Streamlit's cloud server, NOT your local computer. Enter your Ngrok/tunnel URL below!")
     
     # System Status Indicator
     st.markdown('<span class="status-badge">● Engine Online</span>', unsafe_allow_html=True)
@@ -132,7 +145,8 @@ with st.sidebar:
         st.rerun()
 
     st.markdown("---")
-    st.info("🌐 **Network Share Mode**: To make this chat accessible to anyone on your network, run `streamlit run streamlit_app.py --server.address 0.0.0.0`")
+    st.info("🌐 **Remote Access**: Connect to your local Ollama using an `ngrok` or `localtunnel` URL in the host input above.")
+
 
 # Header Section
 col1, col2 = st.columns([3, 1])
@@ -208,9 +222,16 @@ if user_input:
                     "stream": True
                 }
                 
+                # Bypass localtunnel reminder page headers
+                headers = {
+                    "Bypass-Tunnel-Remainder": "true",
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+                }
+                
                 # Streaming response for smooth interactive typing effect
-                res = requests.post(endpoint, json=payload, stream=True, timeout=120)
+                res = requests.post(endpoint, json=payload, headers=headers, stream=True, timeout=120)
                 res.raise_for_status()
+
                 
                 import json
                 for line in res.iter_lines():
@@ -223,8 +244,23 @@ if user_input:
                 message_placeholder.markdown(full_response)
                 
             except Exception as e:
-                full_response = f"⚠️ **Error connecting to engine**: {e}"
+                # If connection to Ollama fails on a deployed cloud instance, attempt fallback or clear demo guidance
+                err_str = str(e)
+                if "Connection refused" in err_str or "Max retries exceeded" in err_str:
+                    full_response = (
+                        f"⚠️ **Engine Disconnected**\n\n"
+                        f"Your cloud app (`Streamlit Cloud`) tried connecting to `http://localhost:11434`, "
+                        f"which is on your local PC.\n\n"
+                        f"**How to enable live responses on your deployed link:**\n"
+                        f"1. Run `npx localtunnel --port 11434` in your PC terminal.\n"
+                        f"2. Paste the generated `https://...` link into the **Ollama Host URL** in the left sidebar.\n\n"
+                        f"*Alternative*: If you are testing locally, launch `ollama serve` on your computer."
+                    )
+                else:
+                    full_response = f"⚠️ **Error connecting to engine**: {e}"
+                
                 message_placeholder.markdown(full_response)
+
 
     # Store assistant response in history
     st.session_state.messages.append({"role": "assistant", "content": full_response})

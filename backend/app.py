@@ -11,6 +11,19 @@ import httpx
 
 app = FastAPI()
 
+@app.get("/")
+async def root():
+    return {
+        "status": "online",
+        "message": "NexusAI FastAPI Backend is running!",
+        "endpoints": {
+            "chat": "POST /chat",
+            "ping": "GET /ping",
+            "docs": "GET /docs"
+        }
+    }
+
+
 OLLAMA_URL = "http://localhost:11434/api/chat"
 MODEL = "llama2"  # change to any model you have pulled with Ollama
 
